@@ -62,10 +62,41 @@ if ! systemctl is-active --quiet redis-server; then
 fi
 
 # 5. Installation Nginx
+# 5. Installation Nginx
 echo "📦 Installation Nginx..."
+
+# Créer les utilisateurs/groupes nécessaires
+if ! getent group adm > /dev/null 2>&1; then
+    groupadd -r adm
+fi
+
+if ! id -u www-data > /dev/null 2>&1; then
+    useradd -r -s /usr/sbin/nologin -d /var/www -g www-data www-data
+fi
+
+# Ajouter www-data au groupe adm
+usermod -a -G adm www-data 2>/dev/null || true
+
+# Installer Nginx
 apt install -y nginx
+
+# Créer les répertoires
+mkdir -p /var/log/nginx
+mkdir -p /var/www/html
+chown -R www-data:adm /var/log/nginx
+chown -R www-data:www-data /var/www
+
+# Démarrer Nginx
+systemctl daemon-reload
 systemctl start nginx
 systemctl enable nginx
+
+# Vérifier
+sleep 2
+if ! systemctl is-active --quiet nginx; then
+    echo "⚠️ Nginx n'a pas démarré, tentative de fix..."
+    systemctl restart nginx
+fi
 
 # 6. Installation PM2
 echo "📦 Installation PM2..."
