@@ -252,7 +252,10 @@ cd /var/quizzouille/backend
 pm2 delete quizzouille-backend 2>/dev/null || true
 pm2 start npm --name quizzouille-backend -- start
 pm2 save
-pm2 startup systemd -u root --hp /root | tail -1 | bash
+
+# Configurer PM2 pour démarrer au boot (sans pipe qui cause des problèmes)
+env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u root --hp /root
+systemctl enable pm2-root
 
 # 15. Créer script de mise à jour
 cat > /root/deploy.sh <<'DEPLOY_EOF'
