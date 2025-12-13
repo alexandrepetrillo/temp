@@ -5,7 +5,7 @@ echo "🚀 Installation de Quizzouille sur Hetzner"
 echo "=========================================="
 
 # ⚠️ CONFIGUREZ CES VARIABLES AVANT D'EXÉCUTER
-GITHUB_REPO="https://github.com/alexandrepetrillo/quizzouille"
+GITHUB_REPO="git@github.com::alexandrepetrillo/quizzouille"
 DOMAIN=""  # Laissez vide si pas de domaine, sinon "exemple.com"
 
 # Génération automatique des secrets
