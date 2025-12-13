@@ -9,7 +9,7 @@ GITHUB_REPO="git@github.com:alexandrepetrillo/quizzouille.git"
 DOMAIN=""  # Laissez vide si pas de domaine, sinon "exemple.com"
 
 # Génération automatique des secrets
-DB_PASSWORD="$(openssl rand -base64 32)"
+DB_PASSWORD="$(openssl rand -hex 16)"
 JWT_SECRET="$(openssl rand -base64 48)"
 JWT_REFRESH_SECRET="$(openssl rand -base64 48)"
 
