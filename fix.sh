@@ -88,8 +88,8 @@ rm -rf /var/backups/postgresql/
 
 # 8. Supprimer les scripts de déploiement
 echo "🗑️  Suppression des scripts..."
-rm -f /root/deploy-hetzner.sh
-rm -f /root/deploy.sh
+#rm -f /root/deploy-hetzner.sh
+#rm -f /root/deploy.sh
 rm -f /root/backup-db.sh
 rm -f /root/cleanup-all.sh
 rm -f /root/fix-redis.sh
