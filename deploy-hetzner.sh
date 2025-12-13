@@ -31,8 +31,8 @@ systemctl enable postgresql
 # 4. Installation Redis
 echo "📦 Installation Redis..."
 apt install -y redis-server
-systemctl start redis
-systemctl enable redis
+systemctl start redis-server
+systemctl enable redis-server
 
 # 5. Installation Nginx
 echo "📦 Installation Nginx..."
