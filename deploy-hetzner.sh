@@ -10,8 +10,8 @@ DOMAIN=""  # Laissez vide si pas de domaine, sinon "exemple.com"
 
 # Génération automatique des secrets
 DB_PASSWORD="$(openssl rand -hex 16)"
-JWT_SECRET="$(openssl rand -base64 48)"
-JWT_REFRESH_SECRET="$(openssl rand -base64 48)"
+JWT_SECRET="$(openssl rand -hex 24)"
+JWT_REFRESH_SECRET="$(openssl rand -hex 24)"
 
 # 1. Mise à jour système
 echo "📦 Mise à jour du système..."
