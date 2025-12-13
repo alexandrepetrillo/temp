@@ -113,9 +113,9 @@ if ! systemctl is-active --quiet nginx; then
     systemctl restart nginx
 fi
 
-# 6. Installation PM2
-echo "📦 Installation PM2..."
-npm install -g pm2
+# 6. Installation PM2, TypeScript et tsx
+echo "📦 Installation PM2, TypeScript et tsx..."
+npm install -g pm2 typescript tsx
 
 # 7. Installation Certbot (SSL)
 echo "📦 Installation Certbot..."
@@ -176,11 +176,14 @@ HOST=localhost
 CORS_ORIGIN=$CORS_URL
 EOF
 
-# Installation dépendances backend
-npm install --production
+# Installation dépendances backend (avec devDependencies pour le build TypeScript)
+npm install
 
 # Générer Prisma Client
 npx prisma generate
+
+# Build TypeScript
+npm run build
 
 # Exécuter migrations
 npx prisma migrate deploy
@@ -344,8 +347,9 @@ echo "🔄 Déploiement nouvelle version..."
 cd /var/quizzouille
 git pull origin main
 cd backend
-npm install --production
+npm install
 npx prisma generate
+npm run build
 npx prisma migrate deploy
 pm2 restart quizzouille-backend
 cd ../frontend
