@@ -6,7 +6,8 @@ echo "=========================================="
 
 # ⚠️ CONFIGUREZ CES VARIABLES AVANT D'EXÉCUTER
 GITHUB_REPO="git@github.com:alexandrepetrillo/quizzouille.git"
-DOMAIN=""  # Laissez vide si pas de domaine, sinon "exemple.com"
+DOMAIN="quizzouille.fun"  # Laissez vide si pas de domaine, sinon "quizzouille.fun"
+EMAIL="alexandre.petrillo@gmail.com"   # Votre email pour Let's Encrypt (requis si DOMAIN est défini)
 
 # Génération automatique des secrets
 DB_PASSWORD="$(openssl rand -hex 16)"
@@ -146,6 +147,13 @@ cd quizzouille
 echo "⚙️ Configuration backend..."
 cd /var/quizzouille/backend
 
+# Déterminer l'URL CORS
+if [ ! -z "$DOMAIN" ]; then
+    CORS_URL="http://$DOMAIN"
+else
+    CORS_URL="http://$(curl -s ifconfig.me)"
+fi
+
 cat > .env <<EOF
 # Database
 DATABASE_URL="postgresql://quizzouille:$DB_PASSWORD@localhost:5432/quizzouille_db?schema=public"
@@ -165,7 +173,7 @@ PORT=3000
 HOST=localhost
 
 # CORS
-CORS_ORIGIN=http://$(curl -s ifconfig.me)
+CORS_ORIGIN=$CORS_URL
 EOF
 
 # Installation dépendances backend
@@ -184,9 +192,16 @@ npm run prisma:seed || echo "⚠️ Seed échoué (normal si déjà exécuté)"
 echo "🎨 Build du frontend..."
 cd /var/quizzouille/frontend
 
+# Déterminer l'URL de l'API
+if [ ! -z "$DOMAIN" ]; then
+    API_URL="http://$DOMAIN"
+else
+    API_URL="http://$(curl -s ifconfig.me)"
+fi
+
 cat > .env.production <<EOF
-VITE_API_URL=http://$(curl -s ifconfig.me)
-VITE_WS_URL=http://$(curl -s ifconfig.me)
+VITE_API_URL=$API_URL
+VITE_WS_URL=$API_URL
 EOF
 
 npm install
@@ -194,16 +209,24 @@ npm run build
 
 # 13. Configuration Nginx
 echo "🌐 Configuration Nginx..."
-cat > /etc/nginx/sites-available/quizzouille <<'NGINX_EOF'
+
+# Déterminer le server_name basé sur la présence d'un domaine
+if [ -z "$DOMAIN" ]; then
+    SERVER_NAME="_"
+else
+    SERVER_NAME="$DOMAIN www.$DOMAIN"
+fi
+
+cat > /etc/nginx/sites-available/quizzouille <<NGINX_EOF
 server {
     listen 80;
-    server_name _;
+    server_name $SERVER_NAME;
     client_max_body_size 10M;
 
     # Frontend
     location / {
         root /var/quizzouille/frontend/dist;
-        try_files $uri $uri/ /index.html;
+        try_files \$uri \$uri/ /index.html;
         expires 1d;
         add_header Cache-Control "public, immutable";
     }
@@ -212,25 +235,25 @@ server {
     location /api {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
     }
 
     # WebSocket
     location /socket.io {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_cache_bypass $http_upgrade;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_cache_bypass \$http_upgrade;
     }
 
     # Compression
@@ -246,6 +269,39 @@ rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/quizzouille /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
 
+# Configuration SSL si un domaine est fourni
+if [ ! -z "$DOMAIN" ] && [ ! -z "$EMAIL" ]; then
+    echo "🔒 Configuration HTTPS avec Let's Encrypt..."
+
+    # Vérifier que le DNS pointe vers ce serveur
+    PUBLIC_IP=$(curl -s ifconfig.me)
+    DNS_IP=$(dig +short $DOMAIN @8.8.8.8 | head -n1)
+
+    if [ "$PUBLIC_IP" = "$DNS_IP" ]; then
+        echo "✅ DNS correctement configuré, installation du certificat SSL..."
+
+        # Obtenir le certificat SSL
+        if certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos --email $EMAIL --redirect; then
+            echo "✅ Certificat SSL installé avec succès"
+            # Mettre à jour les URLs pour HTTPS
+            PROTOCOL="https"
+        else
+            echo "⚠️  Erreur lors de l'installation du certificat SSL"
+            echo "   Vous pourrez le configurer manuellement plus tard"
+            PROTOCOL="http"
+        fi
+    else
+        echo "⚠️  Le DNS ne pointe pas encore vers ce serveur"
+        echo "   IP serveur: $PUBLIC_IP"
+        echo "   IP DNS: $DNS_IP"
+        echo "   Configurez le SSL manuellement après la propagation DNS"
+        PROTOCOL="http"
+    fi
+else
+    PROTOCOL="http"
+    PUBLIC_IP=$(curl -s ifconfig.me)
+fi
+
 # 14. Démarrage backend avec PM2
 echo "🚀 Démarrage du backend..."
 cd /var/quizzouille/backend
@@ -256,6 +312,29 @@ pm2 save
 # Configurer PM2 pour démarrer au boot (sans pipe qui cause des problèmes)
 env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u root --hp /root
 systemctl enable pm2-root
+
+# Si HTTPS a été configuré, mettre à jour les URLs
+if [ ! -z "$DOMAIN" ] && [ ! -z "$EMAIL" ] && [ "$PROTOCOL" = "https" ]; then
+    echo "🔄 Mise à jour des URLs pour HTTPS..."
+
+    # Mettre à jour backend CORS
+    sed -i "s|CORS_ORIGIN=http://|CORS_ORIGIN=https://|g" /var/quizzouille/backend/.env
+
+    # Mettre à jour frontend
+    sed -i "s|VITE_API_URL=http://|VITE_API_URL=https://|g" /var/quizzouille/frontend/.env.production
+    sed -i "s|VITE_WS_URL=http://|VITE_WS_URL=https://|g" /var/quizzouille/frontend/.env.production
+
+    # Rebuild frontend
+    cd /var/quizzouille/frontend
+    npm run build
+
+    # Redémarrer backend
+    cd /var/quizzouille/backend
+    pm2 restart quizzouille-backend
+
+    # Recharger Nginx
+    systemctl reload nginx
+fi
 
 # 15. Créer script de mise à jour
 cat > /root/deploy.sh <<'DEPLOY_EOF'
@@ -301,7 +380,17 @@ echo "✅ ✅ ✅ Installation terminée ! ✅ ✅ ✅"
 echo "=========================================="
 echo ""
 echo "🌐 Accès à l'application :"
-echo "   http://$PUBLIC_IP"
+if [ ! -z "$DOMAIN" ] && [ "$PROTOCOL" = "https" ]; then
+    echo "   https://$DOMAIN"
+    echo "   https://www.$DOMAIN"
+else
+    if [ ! -z "$DOMAIN" ]; then
+        echo "   http://$DOMAIN"
+        echo "   http://www.$DOMAIN"
+    else
+        echo "   http://$PUBLIC_IP"
+    fi
+fi
 echo ""
 echo "📝 Credentials de connexion démo :"
 echo "   Email: demo@quizzouille.com"
@@ -322,13 +411,25 @@ echo "   /root/backup-db.sh            # Backup manuel"
 echo ""
 
 if [ ! -z "$DOMAIN" ]; then
-    echo "🔒 Configuration HTTPS :"
-    echo "   1. Pointer $DOMAIN vers $PUBLIC_IP"
-    echo "   2. Attendre propagation DNS (5-30 min)"
-    echo "   3. Exécuter : certbot --nginx -d $DOMAIN"
-    echo "   4. Modifier CORS_ORIGIN dans /var/quizzouille/backend/.env"
-    echo "   5. Modifier URLs dans /var/quizzouille/frontend/.env.production"
-    echo "   6. Exécuter : /root/deploy.sh"
+    if [ "$PROTOCOL" = "https" ]; then
+        echo "✅ HTTPS configuré avec succès !"
+        echo "   Certificat SSL installé et actif"
+        echo "   Renouvellement automatique activé"
+    else
+        echo "🔒 Configuration HTTPS manuelle nécessaire :"
+        echo "   1. Pointer $DOMAIN vers $PUBLIC_IP chez votre registrar"
+        echo "   2. Attendre propagation DNS (5-30 min)"
+        echo "   3. Télécharger le script de configuration :"
+        echo "      wget https://raw.githubusercontent.com/VOTRE_REPO/main/configure-https.sh"
+        echo "   4. Éditer l'EMAIL dans le script"
+        echo "   5. Exécuter : chmod +x configure-https.sh && ./configure-https.sh"
+        echo ""
+        echo "   OU manuellement :"
+        echo "      certbot --nginx -d $DOMAIN -d www.$DOMAIN --email $EMAIL"
+        echo "      Puis modifier /var/quizzouille/backend/.env (CORS_ORIGIN)"
+        echo "      Et /var/quizzouille/frontend/.env.production (URLs)"
+        echo "      Puis : /root/deploy.sh"
+    fi
 fi
 
 echo ""
