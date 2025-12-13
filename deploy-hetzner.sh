@@ -5,7 +5,7 @@ echo "🚀 Installation de Quizzouille sur Hetzner"
 echo "=========================================="
 
 # ⚠️ CONFIGUREZ CES VARIABLES AVANT D'EXÉCUTER
-GITHUB_REPO="git@github.com::alexandrepetrillo/quizzouille"
+GITHUB_REPO="git@github.com:alexandrepetrillo/quizzouille.git"
 DOMAIN=""  # Laissez vide si pas de domaine, sinon "exemple.com"
 
 # Génération automatique des secrets
@@ -32,9 +32,14 @@ systemctl enable postgresql
 echo "📦 Installation Redis..."
 apt install -y redis-server
 
+# Créer le groupe redis si inexistant
+if ! getent group redis > /dev/null 2>&1; then
+    groupadd -r redis
+fi
+
 # Créer l'utilisateur redis si inexistant
 if ! id -u redis > /dev/null 2>&1; then
-    useradd -r -s /bin/false redis
+    useradd -r -s /bin/false -g redis redis
 fi
 
 # Créer les répertoires nécessaires
@@ -65,11 +70,16 @@ fi
 # 5. Installation Nginx
 echo "📦 Installation Nginx..."
 
-# Créer les utilisateurs/groupes nécessaires
+# Créer les groupes d'abord
 if ! getent group adm > /dev/null 2>&1; then
     groupadd -r adm
 fi
 
+if ! getent group www-data > /dev/null 2>&1; then
+    groupadd -r www-data
+fi
+
+# Puis créer l'utilisateur www-data
 if ! id -u www-data > /dev/null 2>&1; then
     useradd -r -s /usr/sbin/nologin -d /var/www -g www-data www-data
 fi
@@ -78,6 +88,10 @@ fi
 usermod -a -G adm www-data 2>/dev/null || true
 
 # Installer Nginx
+echo "Installation de Nginx..."
+export DEBIAN_FRONTEND=noninteractive
+dpkg --configure -a || true
+apt-get install -f -y || true
 apt install -y nginx
 
 # Créer les répertoires
@@ -317,4 +331,3 @@ fi
 echo ""
 echo "🎉 Quizzouille est maintenant en ligne !"
 echo "=========================================="
-
