@@ -31,8 +31,35 @@ systemctl enable postgresql
 # 4. Installation Redis
 echo "📦 Installation Redis..."
 apt install -y redis-server
+
+# Créer l'utilisateur redis si inexistant
+if ! id -u redis > /dev/null 2>&1; then
+    useradd -r -s /bin/false redis
+fi
+
+# Créer les répertoires nécessaires
+mkdir -p /var/lib/redis
+mkdir -p /var/log/redis
+chown -R redis:redis /var/lib/redis
+chown -R redis:redis /var/log/redis
+chmod 750 /var/lib/redis
+chmod 750 /var/log/redis
+
+# Configurer Redis pour utiliser systemd
+sed -i 's/^supervised no/supervised systemd/' /etc/redis/redis.conf
+
+# Démarrer Redis
+systemctl daemon-reload
+
 systemctl start redis-server
 systemctl enable redis-server
+
+# Vérifier que Redis fonctionne
+if ! systemctl is-active --quiet redis-server; then
+    echo "⚠️  Redis n'a pas démarré correctement, tentative de fix..."
+    systemctl restart redis-server
+    sleep 2
+fi
 
 # 5. Installation Nginx
 echo "📦 Installation Nginx..."
