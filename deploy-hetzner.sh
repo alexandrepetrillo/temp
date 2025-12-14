@@ -18,6 +18,33 @@ JWT_REFRESH_SECRET="$(openssl rand -hex 24)"
 echo "📦 Mise à jour du système..."
 apt update && apt upgrade -y
 
+# 1.1 Optimisation système pour supporter 100+ connexions simultanées
+echo "⚡ Optimisation système pour la charge..."
+
+# Augmenter les limites de fichiers ouverts
+cat >> /etc/security/limits.conf <<EOF
+* soft nofile 65535
+* hard nofile 65535
+root soft nofile 65535
+root hard nofile 65535
+EOF
+
+# Optimiser le kernel pour les connexions réseau
+cat >> /etc/sysctl.conf <<EOF
+# Optimisations pour WebSocket et connexions simultanées
+net.core.somaxconn = 65535
+net.ipv4.tcp_max_syn_backlog = 65535
+net.core.netdev_max_backlog = 65535
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.ip_local_port_range = 1024 65535
+EOF
+
+# Appliquer les paramètres sysctl
+sysctl -p
+
+# Appliquer ulimit pour la session courante
+ulimit -n 65535
+
 # 2. Installation Node.js 20
 echo "📦 Installation Node.js 20..."
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -28,6 +55,13 @@ echo "📦 Installation PostgreSQL..."
 apt install -y postgresql postgresql-contrib
 systemctl start postgresql
 systemctl enable postgresql
+
+# Optimiser PostgreSQL pour réduire les connexions
+echo "⚡ Optimisation PostgreSQL..."
+sudo -u postgres psql -c "ALTER SYSTEM SET max_connections = 30;"
+sudo -u postgres psql -c "ALTER SYSTEM SET shared_buffers = '256MB';"
+sudo -u postgres psql -c "ALTER SYSTEM SET effective_cache_size = '512MB';"
+systemctl restart postgresql
 
 # 4. Installation Redis
 echo "📦 Installation Redis..."
@@ -53,6 +87,16 @@ chmod 750 /var/log/redis
 
 # Configurer Redis pour utiliser systemd
 sed -i 's/^supervised no/supervised systemd/' /etc/redis/redis.conf
+
+# Optimiser Redis pour limiter la mémoire
+echo "⚡ Optimisation Redis..."
+cat >> /etc/redis/redis.conf <<EOF
+
+# Optimisations pour Quizzouille
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+tcp-keepalive 300
+EOF
 
 # Démarrer Redis
 systemctl daemon-reload
@@ -221,6 +265,12 @@ else
 fi
 
 cat > /etc/nginx/sites-available/quizzouille <<NGINX_EOF
+# Upstream avec ip_hash pour sticky sessions (mode cluster PM2)
+upstream backend {
+    ip_hash;
+    server localhost:3000;
+}
+
 server {
     listen 80;
     server_name $SERVER_NAME;
@@ -236,7 +286,7 @@ server {
 
     # Backend API
     location /api {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -247,9 +297,9 @@ server {
         proxy_cache_bypass \$http_upgrade;
     }
 
-    # WebSocket
+    # WebSocket avec timeouts appropriés
     location /socket.io {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -257,6 +307,11 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_cache_bypass \$http_upgrade;
+
+        # Timeouts pour WebSocket
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
     }
 
     # Compression
@@ -305,11 +360,14 @@ else
     PUBLIC_IP=$(curl -s ifconfig.me)
 fi
 
-# 14. Démarrage backend avec PM2
-echo "🚀 Démarrage du backend..."
+# 14. Démarrage backend avec PM2 en mode cluster
+echo "🚀 Démarrage du backend avec PM2 (mode cluster)..."
 cd /var/quizzouille/backend
 pm2 delete quizzouille-backend 2>/dev/null || true
-pm2 start npm --name quizzouille-backend -- start
+
+# Démarrer en mode cluster avec tous les CPU disponibles
+pm2 start dist/index.js --name quizzouille-backend -i max
+
 pm2 save
 
 # Configurer PM2 pour démarrer au boot (sans pipe qui cause des problèmes)
@@ -439,3 +497,4 @@ fi
 echo ""
 echo "🎉 Quizzouille est maintenant en ligne !"
 echo "=========================================="
+
